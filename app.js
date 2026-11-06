@@ -363,24 +363,28 @@ function loadSavedRoute(f) {
 }
 
 function saveCurrentRoute() {
-  if (points.length < 2) return;
+  if (favDlg.open) return;
+  if (points.length < 2) { setStatus('至少需要兩個點才能儲存路線'); return; }
   navigator.vibrate?.(15);
   openFavDialog({ route: points.map(p => [p.lat, p.lng]) });
 }
 
 const cardEl = $('#card');
 let cardTimer = null, cardStart = null, cardPointer = 'mouse';
-cardEl.addEventListener('pointerdown', e => {
-  cardPointer = e.pointerType;
-  if (e.pointerType === 'mouse') return;
-  cardStart = [e.clientX, e.clientY];
+cardEl.addEventListener('pointerdown', e => { cardPointer = e.pointerType; });
+cardEl.addEventListener('touchstart', e => {
+  e.preventDefault();
   clearTimeout(cardTimer);
+  if (e.touches.length > 1) return;
+  cardStart = [e.touches[0].clientX, e.touches[0].clientY];
   cardTimer = setTimeout(saveCurrentRoute, 500);
-});
-cardEl.addEventListener('pointermove', e => {
-  if (cardStart && Math.hypot(e.clientX - cardStart[0], e.clientY - cardStart[1]) > 8) clearTimeout(cardTimer);
-});
-['pointerup', 'pointercancel', 'pointerleave'].forEach(t => cardEl.addEventListener(t, () => clearTimeout(cardTimer)));
+}, { passive: false });
+cardEl.addEventListener('touchmove', e => {
+  const t = e.touches[0];
+  if (cardStart && Math.hypot(t.clientX - cardStart[0], t.clientY - cardStart[1]) > 10) clearTimeout(cardTimer);
+}, { passive: true });
+['touchend', 'touchcancel'].forEach(t => cardEl.addEventListener(t, () => clearTimeout(cardTimer)));
+cardEl.addEventListener('selectstart', e => e.preventDefault());
 cardEl.addEventListener('contextmenu', e => {
   e.preventDefault();
   if (cardPointer === 'mouse') saveCurrentRoute();
