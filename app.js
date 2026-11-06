@@ -144,46 +144,90 @@ function insertIndexFor(routeIdx) {
 }
 
 const mapEl = map.getContainer();
+const activePointers = new Set();
+let rd = null;
+
+function clearGhost() {
+  map.removeLayer(ghostLine);
+  map.removeLayer(ghostPin);
+}
+
+function showGhost(x, y) {
+  const ll = map.containerPointToLatLng(L.point(x - rd.rect.left, y - rd.rect.top));
+  ghostLine.setLatLngs([points[rd.insertAt - 1], ll, points[rd.insertAt]]).addTo(map);
+  ghostPin.setLatLng(ll).addTo(map);
+  return ll;
+}
+
+function cancelRouteDrag() {
+  if (!rd) return;
+  clearTimeout(rd.timer);
+  if (rd.active) map.dragging.enable();
+  clearGhost();
+  rd = null;
+}
+
+function activateRouteDrag() {
+  if (!rd || activePointers.size > 1) { cancelRouteDrag(); return; }
+  rd.active = true;
+  map.dragging.disable();
+  if (rd.touch) {
+    navigator.vibrate?.(15);
+    showGhost(rd.sx, rd.sy);
+  }
+}
+
 mapEl.addEventListener('pointerdown', e => {
+  if (e.isPrimary) activePointers.clear();
+  activePointers.add(e.pointerId);
+  if (activePointers.size > 1) { cancelRouteDrag(); return; }
   if (e.button > 0 || routeCoords.length < 2 || points.length < 2) return;
   if (e.target.closest('.leaflet-marker-icon, .leaflet-control')) return;
   const rect = mapEl.getBoundingClientRect();
-  const cp = L.point(e.clientX - rect.left, e.clientY - rect.top);
-  const hit = nearestRouteIndex(cp);
-  if (hit.dist > (e.pointerType === 'mouse' ? 10 : 20)) return;
+  const hit = nearestRouteIndex(L.point(e.clientX - rect.left, e.clientY - rect.top));
+  const touch = e.pointerType !== 'mouse';
+  if (hit.dist > (touch ? 20 : 10)) return;
 
-  e.stopPropagation();
-  e.preventDefault();
-  map.dragging.disable();
-  const insertAt = insertIndexFor(hit.idx);
-  const sx = e.clientX, sy = e.clientY;
-  let moved = false;
-
-  const move = ev => {
-    if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 6) return;
-    moved = true;
-    const ll = map.containerPointToLatLng(L.point(ev.clientX - rect.left, ev.clientY - rect.top));
-    ghostLine.setLatLngs([points[insertAt - 1], ll, points[insertAt]]).addTo(map);
-    ghostPin.setLatLng(ll).addTo(map);
-  };
-  const up = ev => {
-    document.removeEventListener('pointermove', move);
-    document.removeEventListener('pointerup', up);
-    document.removeEventListener('pointercancel', up);
-    map.dragging.enable();
-    map.removeLayer(ghostLine);
-    map.removeLayer(ghostPin);
-    if (!moved || ev.type === 'pointercancel') return;
-    ignoreClickUntil = Date.now() + 400;
-    const ll = map.containerPointToLatLng(L.point(ev.clientX - rect.left, ev.clientY - rect.top));
-    points.splice(insertAt, 0, ll);
-    renderMarkers();
-    updateRoute();
-  };
-  document.addEventListener('pointermove', move);
-  document.addEventListener('pointerup', up);
-  document.addEventListener('pointercancel', up);
+  rd = { id: e.pointerId, touch, rect, sx: e.clientX, sy: e.clientY, insertAt: insertIndexFor(hit.idx), active: false, moved: false };
+  if (touch) {
+    rd.timer = setTimeout(activateRouteDrag, 450);
+  } else {
+    e.stopPropagation();
+    e.preventDefault();
+    activateRouteDrag();
+  }
 }, true);
+
+document.addEventListener('pointermove', e => {
+  if (!rd || e.pointerId !== rd.id) return;
+  const dist = Math.hypot(e.clientX - rd.sx, e.clientY - rd.sy);
+  if (!rd.active) {
+    if (dist > 8) cancelRouteDrag();
+    return;
+  }
+  if (!rd.moved && dist < 6) return;
+  rd.moved = true;
+  showGhost(e.clientX, e.clientY);
+});
+
+function onPointerEnd(e) {
+  activePointers.delete(e.pointerId);
+  if (!rd || e.pointerId !== rd.id) return;
+  const d = rd;
+  if (!d.active || !d.moved || e.type === 'pointercancel') {
+    if (d.active) ignoreClickUntil = Date.now() + 400;
+    cancelRouteDrag();
+    return;
+  }
+  const ll = map.containerPointToLatLng(L.point(e.clientX - d.rect.left, e.clientY - d.rect.top));
+  cancelRouteDrag();
+  ignoreClickUntil = Date.now() + 400;
+  points.splice(d.insertAt, 0, ll);
+  renderMarkers();
+  updateRoute();
+}
+document.addEventListener('pointerup', onPointerEnd);
+document.addEventListener('pointercancel', onPointerEnd);
 
 // ---------- geo helpers ----------
 function haversine(a, b) {
