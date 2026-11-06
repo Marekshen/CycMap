@@ -52,6 +52,13 @@
     <label>平地均速 (0%)<span><input id="sFlat" type="number" min="1" max="80" step="0.5"> km/h</span></label>
     <label>陡坡速度 (10% 以上)<span><input id="sSteep" type="number" min="1" max="80" step="0.5"> km/h</span></label>
     <p class="hint">0% 到 10% 之間以等差計算，下坡以平地速度計。</p>
+    <label>路線偏好
+      <select id="sProfile">
+        <option value="safety">單車道優先</option>
+        <option value="trekking">平衡</option>
+        <option value="fastbike">最快（公路車）</option>
+      </select>
+    </label>
     <div class="actions">
       <button value="cancel">取消</button>
       <button id="sSave" value="save" class="primary">儲存</button>

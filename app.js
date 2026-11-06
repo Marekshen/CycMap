@@ -7,7 +7,7 @@ function save(key, val) {
   try { localStorage.setItem(key, JSON.stringify(val)); } catch {}
 }
 
-const settings = load('cycmap.settings', { flat: 20, steep: 5 });
+const settings = load('cycmap.settings', { flat: 20, steep: 5, profile: 'safety' });
 const view = load('cycmap.view', { lat: 25.0330, lng: 121.5654, z: 13, layer: 'map' });
 
 const map = L.map('map', { zoomControl: true, attributionControl: true }).setView([view.lat, view.lng], view.z);
@@ -214,6 +214,26 @@ function resample(coords, step) {
 
 // ---------- remote services ----------
 async function fetchRoute(pts) {
+  try {
+    return await fetchBRouter(pts);
+  } catch {
+    return await fetchOSRM(pts);
+  }
+}
+
+async function fetchBRouter(pts) {
+  const lonlats = pts.map(p => `${p.lng.toFixed(6)},${p.lat.toFixed(6)}`).join('|');
+  const url = `https://brouter.de/brouter?lonlats=${lonlats}&profile=${settings.profile}&alternativeidx=0&format=geojson`;
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(await r.text());
+  const f = (await r.json()).features[0];
+  return {
+    coords: f.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
+    distance: +f.properties['track-length']
+  };
+}
+
+async function fetchOSRM(pts) {
   const coords = pts.map(p => `${p.lng.toFixed(6)},${p.lat.toFixed(6)}`).join(';');
   const url = `https://routing.openstreetmap.de/routed-bike/route/v1/driving/${coords}?overview=full&geometries=geojson`;
   const r = await fetch(url);
@@ -573,6 +593,7 @@ const dlg = $('#settings');
 $('#btnSettings').addEventListener('click', () => {
   $('#sFlat').value = settings.flat;
   $('#sSteep').value = settings.steep;
+  $('#sProfile').value = settings.profile;
   dlg.showModal();
 });
 dlg.addEventListener('close', () => {
@@ -580,8 +601,11 @@ dlg.addEventListener('close', () => {
   const f = parseFloat($('#sFlat').value), s = parseFloat($('#sSteep').value);
   if (f > 0) settings.flat = f;
   if (s > 0) settings.steep = s;
+  const profileChanged = $('#sProfile').value !== settings.profile;
+  settings.profile = $('#sProfile').value;
   save('cycmap.settings', settings);
-  showStats();
+  if (profileChanged && points.length >= 2) updateRoute();
+  else showStats();
 });
 
 // ---------- search ----------
