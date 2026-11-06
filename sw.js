@@ -1,4 +1,4 @@
-const CACHE = 'cycmap-v5';
+const CACHE = 'cycmap-v6';
 const ASSETS = [
   './', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
   'icon.svg', 'icon-192.png', 'icon-512.png',

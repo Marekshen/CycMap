@@ -13,49 +13,80 @@ html, body { margin: 0; height: 100%; background: #111; font-family: system-ui, 
 
 button { font: inherit; cursor: pointer; }
 
-#search {
-  position: absolute; z-index: 1001;
-  top: calc(12px + env(safe-area-inset-top)); left: 12px; right: 12px;
-  max-width: 520px; margin: 0 auto;
-  display: flex; border-radius: 14px; padding: 4px;
-}
-#q {
-  flex: 1; min-width: 0; border: 0; outline: 0; background: transparent;
-  color: #fff; font-size: 16px; padding: 8px 10px;
-}
-#q::placeholder { color: #bbb; }
-#search > button { border: 0; border-radius: 10px; background: #16a34a; color: #fff; padding: 0 14px; font-size: 14px; }
-#results {
-  position: absolute; top: calc(100% + 6px); left: 0; right: 0;
-  list-style: none; margin: 0; padding: 4px; border-radius: 12px;
-  background: rgba(20, 24, 28, 0.88); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
-  max-height: 50vh; overflow-y: auto;
-}
-#results li { padding: 9px 10px; border-radius: 8px; font-size: 14px; cursor: pointer; line-height: 1.3; }
-#results li small { display: block; color: #aaa; font-size: 12px; }
-#results li:hover, #results li:active { background: rgba(255, 255, 255, 0.12); }
-#results li.empty { color: #aaa; cursor: default; }
+button svg, .fav-pin svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 
-#layers {
-  position: absolute; z-index: 1000;
-  top: calc(64px + env(safe-area-inset-top)); left: 12px;
-  display: flex; border-radius: 12px; padding: 3px; gap: 2px;
+#toolbar {
+  position: absolute; z-index: 1001;
+  top: calc(10px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+  display: flex; gap: 2px; padding: 4px; border-radius: 14px;
+  max-width: calc(100vw - 16px); overflow-x: auto; scrollbar-width: none;
 }
+#toolbar button {
+  flex: none; width: 40px; height: 40px; border: 0; border-radius: 10px;
+  background: transparent; color: #fff;
+  display: flex; align-items: center; justify-content: center;
+}
+#toolbar button:active { transform: scale(0.92); }
+#toolbar button.on { background: #16a34a; }
+#toolbar button.busy svg { animation: pulse 1s infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
+
+.pop {
+  position: absolute; z-index: 1001;
+  top: calc(66px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+  width: min(420px, calc(100vw - 24px));
+  border-radius: 14px; padding: 6px;
+  background: rgba(20, 24, 28, 0.82);
+}
+.pop[hidden] { display: none; }
+
+#layers { display: flex; gap: 4px; }
 #layers button {
-  border: 0; background: transparent; color: #ddd;
-  padding: 7px 12px; border-radius: 9px; font-size: 14px;
+  flex: 1; border: 0; background: rgba(255, 255, 255, 0.08); color: #ddd;
+  padding: 10px 0; border-radius: 10px; font-size: 15px;
 }
 #layers button.active { background: #16a34a; color: #fff; }
 
-#tools {
-  position: absolute; z-index: 1000;
-  top: calc(64px + env(safe-area-inset-top)); right: 12px;
-  display: flex; flex-direction: column; gap: 8px;
+#search { display: flex; gap: 4px; align-items: center; }
+#q {
+  flex: 1; min-width: 0; border: 0; outline: 0; background: transparent;
+  color: #fff; font-size: 16px; padding: 8px 8px;
 }
-#tools button { border-radius: 12px; padding: 9px 14px; font-size: 14px; }
-#tools button:active { transform: scale(0.96); }
+#q::placeholder { color: #bbb; }
+#q::-webkit-search-cancel-button { display: none; }
+button.icon {
+  flex: none; width: 38px; height: 38px; border: 0; border-radius: 10px;
+  background: rgba(255, 255, 255, 0.1); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+}
+button.icon svg { width: 20px; height: 20px; }
+#search button[type=submit] { background: #16a34a; }
 
-.leaflet-top.leaflet-left { top: calc(108px + env(safe-area-inset-top)); }
+#results, #favList {
+  list-style: none; margin: 6px 0 0; padding: 0;
+  max-height: 50vh; overflow-y: auto;
+}
+#favList { margin: 0; }
+#results li { padding: 9px 10px; border-radius: 8px; font-size: 14px; cursor: pointer; line-height: 1.3; color: #fff; }
+#results li small { display: block; color: #aaa; font-size: 12px; }
+#results li:hover, #results li:active { background: rgba(255, 255, 255, 0.12); }
+#results li.empty, #favList li.empty { color: #aaa; cursor: default; }
+
+#favList li { display: flex; align-items: center; gap: 6px; padding: 4px 4px 4px 10px; border-radius: 8px; color: #fff; font-size: 15px; }
+#favList li.empty { padding: 10px; font-size: 14px; }
+#favList .name { flex: 1; min-width: 0; padding: 8px 0; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#favList .name::before { content: "★ "; color: #facc15; }
+#favList li:hover { background: rgba(255, 255, 255, 0.06); }
+#favList button.icon { width: 34px; height: 34px; }
+.leaflet-tooltip.fav-label {
+  background: rgba(20, 24, 28, 0.7); color: #fff; border: 0; box-shadow: none;
+  padding: 2px 6px; border-radius: 6px; font-size: 12px;
+}
+.leaflet-tooltip.fav-label::before { display: none; }
+.pop .hint { margin: 6px 8px 4px; }
+
+.leaflet-bottom.leaflet-right { bottom: env(safe-area-inset-bottom); }
+
 
 #card {
   position: absolute; z-index: 1000;
@@ -81,6 +112,9 @@ button { font: inherit; cursor: pointer; }
 }
 .pin.start { background: #16a34a; }
 .pin.end { background: #dc2626; }
+.fav-pin { color: #facc15; filter: drop-shadow(0 1px 2px rgba(0,0,0,.6)); }
+.fav-pin svg { width: 22px; height: 22px; fill: #facc15; stroke: #78350f; stroke-width: 1.2; }
+.me-dot { width: 16px; height: 16px; border-radius: 50%; background: #3b82f6; border: 3px solid #fff; box-shadow: 0 0 0 4px rgba(59,130,246,.35); }
 .pin.ghost { width: 22px; height: 22px; background: rgba(37, 99, 235, 0.6); }
 
 dialog {
@@ -96,3 +130,4 @@ dialog select { padding: 6px; border-radius: 8px; border: 1px solid #444; backgr
 .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
 .actions button { border: 0; border-radius: 10px; padding: 8px 16px; background: #333; color: #eee; }
 .actions button.primary { background: #16a34a; color: #fff; }
+dialog input.wide { width: 100%; text-align: left; padding: 9px 10px; font-size: 16px; }

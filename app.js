@@ -10,7 +10,8 @@ function save(key, val) {
 const settings = load('cycmap.settings', { flat: 20, steep: 5, profile: 'safety' });
 const view = load('cycmap.view', { lat: 25.0330, lng: 121.5654, z: 13, layer: 'map' });
 
-const map = L.map('map', { zoomControl: true, attributionControl: true }).setView([view.lat, view.lng], view.z);
+const map = L.map('map', { zoomControl: false, attributionControl: true }).setView([view.lat, view.lng], view.z);
+L.control.zoom({ position: 'bottomright' }).addTo(map);
 
 const TILE = {
   osm: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
@@ -43,7 +44,9 @@ function setLayer(name) {
 setLayer(view.layer);
 $('#layers').addEventListener('click', e => {
   const b = e.target.closest('button');
-  if (b) setLayer(b.dataset.layer);
+  if (!b) return;
+  setLayer(b.dataset.layer);
+  closePops();
 });
 map.on('moveend', () => {
   const c = map.getCenter();
@@ -83,8 +86,8 @@ function renderMarkers() {
 }
 
 map.on('click', e => {
-  closeResults();
   if (Date.now() < ignoreClickUntil) return;
+  if (anyPopOpen()) { closePops(); return; }
   points.push(e.latlng);
   renderMarkers();
   updateRoute();
@@ -146,6 +149,7 @@ function insertIndexFor(routeIdx) {
 const mapEl = map.getContainer();
 const activePointers = new Set();
 let rd = null;
+let lastPointerType = 'mouse';
 
 function clearGhost() {
   map.removeLayer(ghostLine);
@@ -167,34 +171,45 @@ function cancelRouteDrag() {
   rd = null;
 }
 
-function activateRouteDrag() {
+function onLongPress() {
   if (!rd || activePointers.size > 1) { cancelRouteDrag(); return; }
+  navigator.vibrate?.(15);
+  if (rd.insertAt == null) {
+    const ll = map.containerPointToLatLng(L.point(rd.sx - rd.rect.left, rd.sy - rd.rect.top));
+    cancelRouteDrag();
+    ignoreClickUntil = Date.now() + 1000;
+    openFavDialog({ latlng: ll });
+    return;
+  }
   rd.active = true;
   map.dragging.disable();
-  if (rd.touch) {
-    navigator.vibrate?.(15);
-    showGhost(rd.sx, rd.sy);
-  }
+  showGhost(rd.sx, rd.sy);
 }
 
 mapEl.addEventListener('pointerdown', e => {
+  lastPointerType = e.pointerType;
   if (e.isPrimary) activePointers.clear();
   activePointers.add(e.pointerId);
   if (activePointers.size > 1) { cancelRouteDrag(); return; }
-  if (e.button > 0 || routeCoords.length < 2 || points.length < 2) return;
+  if (e.button > 0) return;
   if (e.target.closest('.leaflet-marker-icon, .leaflet-control')) return;
   const rect = mapEl.getBoundingClientRect();
-  const hit = nearestRouteIndex(L.point(e.clientX - rect.left, e.clientY - rect.top));
   const touch = e.pointerType !== 'mouse';
-  if (hit.dist > (touch ? 20 : 10)) return;
+  let insertAt = null;
+  if (routeCoords.length >= 2 && points.length >= 2) {
+    const hit = nearestRouteIndex(L.point(e.clientX - rect.left, e.clientY - rect.top));
+    if (hit.dist <= (touch ? 20 : 10)) insertAt = insertIndexFor(hit.idx);
+  }
+  if (!touch && insertAt == null) return;
 
-  rd = { id: e.pointerId, touch, rect, sx: e.clientX, sy: e.clientY, insertAt: insertIndexFor(hit.idx), active: false, moved: false };
+  rd = { id: e.pointerId, touch, rect, sx: e.clientX, sy: e.clientY, insertAt, active: false, moved: false };
   if (touch) {
-    rd.timer = setTimeout(activateRouteDrag, 450);
+    rd.timer = setTimeout(onLongPress, 450);
   } else {
     e.stopPropagation();
     e.preventDefault();
-    activateRouteDrag();
+    rd.active = true;
+    map.dragging.disable();
   }
 }, true);
 
@@ -214,20 +229,164 @@ function onPointerEnd(e) {
   activePointers.delete(e.pointerId);
   if (!rd || e.pointerId !== rd.id) return;
   const d = rd;
-  if (!d.active || !d.moved || e.type === 'pointercancel') {
-    if (d.active) ignoreClickUntil = Date.now() + 400;
-    cancelRouteDrag();
+  cancelRouteDrag();
+  if (!d.active || e.type === 'pointercancel') return;
+  ignoreClickUntil = Date.now() + 400;
+  if (!d.moved) {
+    if (d.touch) openFavDialog({ latlng: map.containerPointToLatLng(L.point(d.sx - d.rect.left, d.sy - d.rect.top)) });
     return;
   }
   const ll = map.containerPointToLatLng(L.point(e.clientX - d.rect.left, e.clientY - d.rect.top));
-  cancelRouteDrag();
-  ignoreClickUntil = Date.now() + 400;
   points.splice(d.insertAt, 0, ll);
   renderMarkers();
   updateRoute();
 }
 document.addEventListener('pointerup', onPointerEnd);
 document.addEventListener('pointercancel', onPointerEnd);
+
+map.on('contextmenu', e => {
+  if (lastPointerType !== 'mouse') return;
+  openFavDialog({ latlng: e.latlng });
+});
+
+// ---------- favorites ----------
+const DEFAULT_FAVS = [
+  { name: '我家', lat: 25.00440233141087, lng: 121.43428600947412 },
+  { name: '風櫃嘴', lat: 25.13711967500625, lng: 121.60277528412453 }
+];
+let favs;
+try { favs = JSON.parse(localStorage.getItem('cycmap.favs')) || DEFAULT_FAVS.slice(); } catch { favs = DEFAULT_FAVS.slice(); }
+const favLayer = L.layerGroup().addTo(map);
+const favIcon = L.divIcon({ className: 'fav-pin', html: '<svg viewBox="0 0 24 24"><use href="#i-star"/></svg>', iconSize: [22, 22], iconAnchor: [11, 11] });
+
+function saveFavs() { save('cycmap.favs', favs); }
+
+function renderFavs() {
+  favLayer.clearLayers();
+  favs.forEach(f => {
+    L.marker([f.lat, f.lng], { icon: favIcon, bubblingMouseEvents: false })
+      .bindTooltip(f.name, { direction: 'right', offset: [10, 0], className: 'fav-label', permanent: true })
+      .on('click', e => {
+        L.DomEvent.stopPropagation(e);
+        closePops();
+        points.push(L.latLng(f.lat, f.lng));
+        renderMarkers();
+        updateRoute();
+      })
+      .addTo(favLayer);
+  });
+  renderFavList();
+}
+
+function iconBtn(id, label, fn) {
+  const b = document.createElement('button');
+  b.className = 'icon';
+  b.setAttribute('aria-label', label);
+  b.title = label;
+  b.innerHTML = `<svg><use href="#${id}"/></svg>`;
+  b.addEventListener('click', fn);
+  return b;
+}
+
+function renderFavList() {
+  const ul = $('#favList');
+  ul.innerHTML = '';
+  if (!favs.length) {
+    ul.innerHTML = '<li class="empty">尚無喜愛點</li>';
+    return;
+  }
+  favs.forEach((f, i) => {
+    const li = document.createElement('li');
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.textContent = f.name;
+    name.addEventListener('click', () => { closePops(); map.setView([f.lat, f.lng], Math.max(map.getZoom(), 15)); });
+    li.append(
+      name,
+      iconBtn('i-plus', '加入路線', () => {
+        closePops();
+        points.push(L.latLng(f.lat, f.lng));
+        renderMarkers();
+        updateRoute();
+      }),
+      iconBtn('i-pencil', '重新命名', () => openFavDialog({ index: i })),
+      iconBtn('i-trash', '刪除', () => {
+        if (!confirm(`刪除「${f.name}」？`)) return;
+        favs.splice(i, 1);
+        saveFavs();
+        renderFavs();
+      })
+    );
+    ul.appendChild(li);
+  });
+}
+
+let favEdit = null;
+const favDlg = $('#favDialog');
+function openFavDialog(opts) {
+  favEdit = opts;
+  const f = opts.index != null ? favs[opts.index] : null;
+  $('#favTitle').textContent = f ? '重新命名' : '新增喜愛點';
+  $('#favName').value = f ? f.name : '';
+  favDlg.showModal();
+  setTimeout(() => $('#favName').focus(), 50);
+}
+favDlg.addEventListener('close', () => {
+  const name = $('#favName').value.trim();
+  if (favDlg.returnValue !== 'save' || !name || !favEdit) return;
+  if (favEdit.index != null) favs[favEdit.index].name = name;
+  else favs.push({ name, lat: favEdit.latlng.lat, lng: favEdit.latlng.lng });
+  favEdit = null;
+  saveFavs();
+  renderFavs();
+});
+$('#favName').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); favDlg.close('save'); }
+});
+
+// ---------- toolbar & popovers ----------
+function closePops() {
+  document.querySelectorAll('.pop').forEach(p => { p.hidden = true; });
+  document.querySelectorAll('#toolbar [data-pop]').forEach(b => b.classList.remove('on'));
+}
+function anyPopOpen() {
+  return [...document.querySelectorAll('.pop')].some(p => !p.hidden);
+}
+$('#toolbar').addEventListener('click', e => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (!b.dataset.pop) { closePops(); return; }
+  const pop = $('#' + b.dataset.pop);
+  const willOpen = pop.hidden;
+  closePops();
+  if (!willOpen) return;
+  pop.hidden = false;
+  b.classList.add('on');
+  if (b.dataset.pop === 'popSearch') $('#q').focus();
+});
+
+// ---------- locate ----------
+let meMarker = null, meCircle = null;
+$('#btnLocate').addEventListener('click', () => {
+  if (!navigator.geolocation) { alert('此裝置不支援定位'); return; }
+  const btn = $('#btnLocate');
+  btn.classList.add('busy');
+  navigator.geolocation.getCurrentPosition(pos => {
+    btn.classList.remove('busy');
+    const ll = L.latLng(pos.coords.latitude, pos.coords.longitude);
+    if (!meMarker) {
+      meCircle = L.circle(ll, { radius: pos.coords.accuracy, color: '#3b82f6', weight: 1, fillOpacity: 0.12, interactive: false }).addTo(map);
+      meMarker = L.marker(ll, { icon: L.divIcon({ className: '', html: '<div class="me-dot"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }), interactive: false }).addTo(map);
+    } else {
+      meMarker.setLatLng(ll);
+      meCircle.setLatLng(ll).setRadius(pos.coords.accuracy);
+    }
+    map.setView(ll, Math.max(map.getZoom(), 16));
+  }, err => {
+    btn.classList.remove('busy');
+    alert(err.code === 1 ? '未授權定位，請在瀏覽器設定中允許' : '無法取得目前位置');
+  }, { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 });
+});
 
 // ---------- geo helpers ----------
 function haversine(a, b) {
@@ -680,7 +839,7 @@ $('#search').addEventListener('submit', async e => {
       li.addEventListener('click', () => {
         const bb = r.boundingbox.map(Number);
         map.fitBounds([[bb[0], bb[2]], [bb[1], bb[3]]], { maxZoom: 16 });
-        closeResults();
+        closePops();
       });
       resultsEl.appendChild(li);
     });
@@ -689,6 +848,14 @@ $('#search').addEventListener('submit', async e => {
   }
 });
 $('#q').addEventListener('input', () => { if (!$('#q').value) closeResults(); });
+$('#searchClose').addEventListener('click', () => {
+  $('#q').value = '';
+  resultsEl.innerHTML = '';
+  closeResults();
+  closePops();
+});
+
+renderFavs();
 
 // ---------- PWA ----------
 if ('serviceWorker' in navigator) {
