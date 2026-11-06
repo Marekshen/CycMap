@@ -1,4 +1,4 @@
-const CACHE = 'cycmap-v9';
+const CACHE = 'cycmap-v10';
 const ASSETS = [
   './', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
   'icon.svg', 'icon-192.png', 'icon-512.png',
@@ -7,7 +7,11 @@ const ASSETS = [
 ];
 
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  e.waitUntil(
+    caches.open(CACHE)
+      .then(c => c.addAll(ASSETS.map(u => new Request(u, { cache: 'reload' }))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', e => {
@@ -20,13 +24,15 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('fetch', e => {
   const url = new URL(e.request.url);
-  const shell = url.origin === location.origin || url.hostname === 'unpkg.com';
-  if (e.request.method !== 'GET' || !shell) return;
+  const same = url.origin === location.origin;
+  if (e.request.method !== 'GET' || !(same || url.hostname === 'unpkg.com')) return;
   e.respondWith(
-    fetch(e.request)
+    fetch(e.request, same ? { cache: 'no-cache' } : undefined)
       .then(res => {
-        const copy = res.clone();
-        caches.open(CACHE).then(c => c.put(e.request, copy));
+        if (res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE).then(c => c.put(e.request, copy));
+        }
         return res;
       })
       .catch(() => caches.match(e.request))

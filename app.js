@@ -1,3 +1,4 @@
+const APP_VERSION = '10';
 const $ = s => document.querySelector(s);
 
 function load(key, def) {
@@ -366,7 +367,18 @@ function saveCurrentRoute() {
   if (favDlg.open) return;
   if (points.length < 2) { setStatus('至少需要兩個點才能儲存路線'); return; }
   navigator.vibrate?.(15);
-  openFavDialog({ route: points.map(p => [p.lat, p.lng]) });
+  cardEl.classList.add('pressed');
+  setTimeout(() => cardEl.classList.remove('pressed'), 200);
+  const route = points.map(p => [p.lat, p.lng]);
+  try {
+    openFavDialog({ route });
+  } catch {
+    const name = (prompt('路線名稱') || '').trim();
+    if (!name) return;
+    favs.push({ type: 'route', name, pts: route });
+    saveFavs();
+    renderFavs();
+  }
 }
 
 const cardEl = $('#card');
@@ -465,11 +477,13 @@ function resample(coords, step) {
 
 // ---------- remote services ----------
 async function fetchRoute(pts) {
-  try {
-    return await fetchBRouter(pts);
-  } catch {
-    return await fetchOSRM(pts);
+  let err;
+  for (let i = 0; i < 2; i++) {
+    try { return await fetchBRouter(pts); } catch (e) { err = e; }
   }
+  const r = await fetchOSRM(pts);
+  r.note = `BRouter 失敗，改用備援路線（${String(err.message || err).slice(0, 60)}）`;
+  return r;
 }
 
 async function fetchBRouter(pts) {
@@ -503,7 +517,7 @@ async function fetchElevations(pts) {
     const lat = c.map(p => p[0].toFixed(5)).join(',');
     const lng = c.map(p => p[1].toFixed(5)).join(',');
     const r = await fetch(`https://api.open-meteo.com/v1/elevation?latitude=${lat}&longitude=${lng}`);
-    if (!r.ok) throw new Error('高度資料取得失敗');
+    if (!r.ok) throw new Error(`Open-Meteo HTTP ${r.status}`);
     return (await r.json()).elevation;
   }));
   return res.flat();
@@ -564,10 +578,10 @@ async function updateRoute() {
       return (a + b + c) / 3;
     });
     segments = dists.map((d, i) => ({ d: d * scale, dh: ele[i + 1] - ele[i] }));
-    setStatus('');
-  } catch {
+    setStatus(route.note || '');
+  } catch (err) {
     if (id !== reqId) return;
-    setStatus('無法取得高度，以平地估算');
+    setStatus(`無法取得高度，以平地估算（${err.message || err}）`);
   }
   showStats();
 }
@@ -845,6 +859,7 @@ $('#btnSettings').addEventListener('click', () => {
   $('#sFlat').value = settings.flat;
   $('#sSteep').value = settings.steep;
   $('#sProfile').value = settings.profile;
+  $('#ver').textContent = `版本 ${APP_VERSION}`;
   dlg.showModal();
 });
 dlg.addEventListener('close', () => {
@@ -907,5 +922,17 @@ renderFavs();
 
 // ---------- PWA ----------
 if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController || reloaded) return;
+    reloaded = true;
+    location.reload();
+  });
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(r => r.update()).catch(() => {});
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') navigator.serviceWorker.getRegistration().then(r => r?.update()).catch(() => {});
+  });
 }

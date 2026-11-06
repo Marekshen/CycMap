@@ -98,6 +98,8 @@ button.icon svg { width: 20px; height: 20px; }
   max-width: calc(100vw - 24px);
 }
 #card.hidden { display: none; }
+#card { transition: transform .15s; }
+#card.pressed { transform: scale(0.96); }
 #mini { width: 120px; height: 120px; border-radius: 10px; background: rgba(0, 0, 0, 0.35); flex: none; }
 .stats { min-width: 130px; }
 .row { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
