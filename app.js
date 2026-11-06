@@ -12,21 +12,23 @@ const view = load('cycmap.view', { lat: 25.0330, lng: 121.5654, z: 13, layer: 'm
 
 const map = L.map('map', { zoomControl: true, attributionControl: true }).setView([view.lat, view.lng], view.z);
 
+const TILE = {
+  osm: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+  sat: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  satLabels: 'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}',
+  cycle: 'https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png'
+};
+const MINI_TILE = { map: TILE.osm, sat: TILE.sat, cycle: TILE.cycle };
+const ATTRIB = { map: '© OpenStreetMap', sat: 'Esri World Imagery', cycle: 'CyclOSM | © OpenStreetMap' };
+const xo = { crossOrigin: 'anonymous' };
+
 const layers = {
-  map: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19, attribution: '&copy; OpenStreetMap'
-  }),
+  map: L.tileLayer(TILE.osm, { ...xo, maxZoom: 19, attribution: '&copy; OpenStreetMap' }),
   sat: L.layerGroup([
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      maxZoom: 19, attribution: 'Esri World Imagery'
-    }),
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
-      maxZoom: 19
-    })
+    L.tileLayer(TILE.sat, { ...xo, maxZoom: 19, attribution: 'Esri World Imagery' }),
+    L.tileLayer(TILE.satLabels, { ...xo, maxZoom: 19 })
   ]),
-  cycle: L.tileLayer('https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png', {
-    maxZoom: 20, subdomains: 'abc', attribution: 'CyclOSM | &copy; OpenStreetMap'
-  })
+  cycle: L.tileLayer(TILE.cycle, { ...xo, maxZoom: 20, subdomains: 'abc', attribution: 'CyclOSM | &copy; OpenStreetMap' })
 };
 let currentLayer = null;
 function setLayer(name) {
@@ -36,6 +38,7 @@ function setLayer(name) {
   document.querySelectorAll('#layers button').forEach(b => b.classList.toggle('active', b.dataset.layer === name));
   view.layer = name;
   save('cycmap.view', view);
+  if (typeof drawMini === 'function' && !$('#card').classList.contains('hidden')) drawMini();
 }
 setLayer(view.layer);
 $('#layers').addEventListener('click', e => {
@@ -332,54 +335,238 @@ function showStats(empty) {
 function setStatus(t) { $('#status').textContent = t; }
 
 // ---------- mini map ----------
+const tileCache = new Map();
+function loadTile(url) {
+  if (!tileCache.has(url)) {
+    tileCache.set(url, new Promise(res => {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => res(img);
+      img.onerror = () => { tileCache.delete(url); res(null); };
+      img.src = url;
+    }));
+  }
+  return tileCache.get(url);
+}
+function tileUrl(tpl, z, x, y) {
+  return tpl.replace('{s}', 'abc'[(x + y) % 3]).replace('{z}', z).replace('{x}', x).replace('{y}', y);
+}
+
+let miniToken = 0;
 function drawMini() {
+  const token = ++miniToken;
   const cv = $('#mini');
   const dpr = window.devicePixelRatio || 1;
-  const W = 120, H = 120;
+  const W = 120, H = 120, pad = 14;
   cv.width = W * dpr; cv.height = H * dpr;
   const ctx = cv.getContext('2d');
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, W, H);
+  const crs = L.CRS.EPSG3857;
 
   const path = routeCoords.length >= 2 ? routeCoords : points.map(p => [p.lat, p.lng]);
+  let z = 14, s = 1, cx = 0, cy = 0;
   if (path.length) {
-    const lat0 = path.reduce((s, p) => s + p[0], 0) / path.length;
-    const kx = Math.cos(lat0 * Math.PI / 180);
-    const xs = path.map(p => p[1] * kx), ys = path.map(p => p[0]);
+    const w0 = path.map(p => crs.latLngToPoint(L.latLng(p[0], p[1]), 0));
+    const xs = w0.map(p => p.x), ys = w0.map(p => p.y);
     const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
-    const pad = 14;
-    const span = Math.max(maxX - minX, maxY - minY) || 1e-6;
-    const sc = (W - pad * 2) / span;
-    const ox = (W - (maxX - minX) * sc) / 2, oy = (H - (maxY - minY) * sc) / 2;
-    const P = i => [ox + (xs[i] - minX) * sc, H - (oy + (ys[i] - minY) * sc)];
+    const span = Math.max(maxX - minX, maxY - minY);
+    if (span > 0) {
+      const k = (W - pad * 2) / span;
+      z = Math.max(0, Math.min(17, Math.floor(Math.log2(k))));
+      s = k / 2 ** z;
+    }
+    cx = (minX + maxX) / 2 * 2 ** z;
+    cy = (minY + maxY) / 2 * 2 ** z;
+  }
+  const P = ll => {
+    const p = crs.latLngToPoint(L.latLng(ll[0], ll[1]), z);
+    return [W / 2 + (p.x - cx) * s, H / 2 + (p.y - cy) * s];
+  };
 
+  const tiles = [];
+  if (path.length) {
+    const ts = 256 * s, n = 2 ** z;
+    const x0 = Math.floor((cx - W / 2 / s) / 256), x1 = Math.floor((cx + W / 2 / s) / 256);
+    const y0 = Math.max(0, Math.floor((cy - H / 2 / s) / 256)), y1 = Math.min(n - 1, Math.floor((cy + H / 2 / s) / 256));
+    const tpl = MINI_TILE[view.layer] || TILE.osm;
+    for (let tx = x0; tx <= x1; tx++) for (let ty = y0; ty <= y1; ty++) {
+      tiles.push({ url: tileUrl(tpl, z, ((tx % n) + n) % n, ty), x: W / 2 + (tx * 256 - cx) * s, y: H / 2 + (ty * 256 - cy) * s, size: ts });
+    }
+  }
+
+  const paint = imgs => {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    if (imgs) {
+      ctx.globalAlpha = 0.45;
+      tiles.forEach((t, i) => { if (imgs[i]) ctx.drawImage(imgs[i], t.x, t.y, t.size + 0.5, t.size + 0.5); });
+      ctx.globalAlpha = 1;
+    }
     if (path.length >= 2) {
       ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+      const pts = path.map(P);
       const stroke = (w, c) => {
         ctx.beginPath();
-        path.forEach((_, i) => { const [x, y] = P(i); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+        pts.forEach(([x, y], i) => i ? ctx.lineTo(x, y) : ctx.moveTo(x, y));
         ctx.lineWidth = w; ctx.strokeStyle = c; ctx.stroke();
       };
       stroke(7, 'rgba(0,0,0,0.6)');
       stroke(4, '#ffffff');
-      stroke(1.5, '#60a5fa');
+      stroke(1.5, '#2563eb');
     }
-    const dot = (i, c) => {
-      const [x, y] = P(i);
+    const dot = (ll, c) => {
+      const [x, y] = P(ll);
       ctx.beginPath(); ctx.arc(x, y, 4.5, 0, Math.PI * 2);
       ctx.fillStyle = c; ctx.fill(); ctx.lineWidth = 1.5; ctx.strokeStyle = '#fff'; ctx.stroke();
     };
-    if (path.length >= 2) dot(path.length - 1, '#dc2626');
-    dot(0, '#16a34a');
+    if (path.length >= 2) dot(path[path.length - 1], '#dc2626');
+    if (path.length) dot(path[0], '#16a34a');
+
+    ctx.font = 'bold 10px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.beginPath(); ctx.moveTo(W - 12, 6); ctx.lineTo(W - 16, 15); ctx.lineTo(W - 8, 15); ctx.closePath();
+    ctx.fillStyle = '#ef4444'; ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.fillText('N', W - 12, 25);
+  };
+
+  paint(null);
+  if (tiles.length) {
+    Promise.all(tiles.map(t => loadTile(t.url))).then(imgs => { if (token === miniToken) paint(imgs); });
+  }
+}
+
+// ---------- export ----------
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function renderExport() {
+  const el = map.getContainer();
+  const box = el.getBoundingClientRect();
+  const W = box.width, H = box.height;
+  const dpr = Math.max(2, window.devicePixelRatio || 1);
+  const cv = document.createElement('canvas');
+  cv.width = W * dpr; cv.height = H * dpr;
+  const ctx = cv.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.fillStyle = '#ddd';
+  ctx.fillRect(0, 0, W, H);
+
+  const tls = currentLayer.getLayers ? currentLayer.getLayers() : [currentLayer];
+  for (const tl of tls) {
+    tl.getContainer().querySelectorAll('img.leaflet-tile-loaded').forEach(img => {
+      const r = img.getBoundingClientRect();
+      if (r.right < box.left || r.left > box.right || r.bottom < box.top || r.top > box.bottom) return;
+      ctx.drawImage(img, r.left - box.left, r.top - box.top, r.width + 0.5, r.height + 0.5);
+    });
   }
 
-  ctx.fillStyle = '#fff';
-  ctx.font = 'bold 10px system-ui, sans-serif';
-  ctx.textAlign = 'center';
-  ctx.beginPath(); ctx.moveTo(W - 12, 6); ctx.lineTo(W - 16, 15); ctx.lineTo(W - 8, 15); ctx.closePath();
-  ctx.fillStyle = '#ef4444'; ctx.fill();
-  ctx.fillStyle = '#fff'; ctx.fillText('N', W - 12, 25);
+  if (routeCoords.length >= 2) {
+    const pts = routeCoords.map(c => map.latLngToContainerPoint(c));
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    const stroke = (w, c, a) => {
+      ctx.beginPath();
+      pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+      ctx.lineWidth = w; ctx.strokeStyle = c; ctx.globalAlpha = a; ctx.stroke();
+    };
+    stroke(9, '#fff', 0.9);
+    stroke(5, '#2563eb', 1);
+    ctx.globalAlpha = 1;
+  }
+
+  points.forEach((p, i) => {
+    const n = points.length;
+    const c = map.latLngToContainerPoint(p);
+    const isEnd = i === n - 1 && n > 1;
+    ctx.beginPath(); ctx.arc(c.x, c.y, 13, 0, Math.PI * 2);
+    ctx.fillStyle = i === 0 ? '#16a34a' : isEnd ? '#dc2626' : '#2563eb';
+    ctx.fill(); ctx.lineWidth = 2; ctx.strokeStyle = '#fff'; ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 12px system-ui, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(i === 0 ? 'S' : isEnd ? 'G' : String(i), c.x, c.y + 0.5);
+  });
+
+  const card = $('#card');
+  if (!card.classList.contains('hidden')) {
+    const r = card.getBoundingClientRect();
+    const x = r.left - box.left, y = r.top - box.top;
+    const snap = document.createElement('canvas');
+    snap.width = cv.width; snap.height = cv.height;
+    snap.getContext('2d').drawImage(cv, 0, 0);
+    ctx.save();
+    roundRect(ctx, x, y, r.width, r.height, 16);
+    ctx.clip();
+    ctx.filter = 'blur(10px)';
+    ctx.drawImage(snap, 0, 0, W, H);
+    ctx.filter = 'none';
+    ctx.fillStyle = 'rgba(20, 24, 28, 0.55)';
+    ctx.fillRect(x, y, r.width, r.height);
+    ctx.restore();
+    roundRect(ctx, x + 0.5, y + 0.5, r.width - 1, r.height - 1, 16);
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1; ctx.stroke();
+
+    const mini = $('#mini'), mr = mini.getBoundingClientRect();
+    const mx = mr.left - box.left, my = mr.top - box.top;
+    ctx.save();
+    roundRect(ctx, mx, my, mr.width, mr.height, 10);
+    ctx.clip();
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(mx, my, mr.width, mr.height);
+    ctx.drawImage(mini, mx, my, mr.width, mr.height);
+    ctx.restore();
+
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    card.querySelectorAll('.label, .val, #climb, #avg, #status').forEach(t => {
+      if (!t.textContent) return;
+      const tr = t.getBoundingClientRect(), cs = getComputedStyle(t);
+      ctx.font = `${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+      ctx.fillStyle = cs.color;
+      ctx.fillText(t.textContent, tr.left - box.left, tr.top - box.top + tr.height / 2);
+    });
+  }
+
+  ctx.font = '11px system-ui, sans-serif';
+  ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+  const attr = ATTRIB[view.layer] || '';
+  const tw = ctx.measureText(attr).width;
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  ctx.fillRect(W - tw - 10, H - 18, tw + 10, 18);
+  ctx.fillStyle = '#333';
+  ctx.fillText(attr, W - 5, H - 3);
+  return cv;
 }
+
+$('#btnExport').addEventListener('click', async () => {
+  const btn = $('#btnExport');
+  btn.disabled = true;
+  try {
+    const cv = renderExport();
+    const blob = await new Promise((res, rej) => cv.toBlob(b => b ? res(b) : rej(new Error('toBlob')), 'image/png'));
+    const d = new Date(), pad2 = n => String(n).padStart(2, '0');
+    const name = `cycmap-${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}-${pad2(d.getHours())}${pad2(d.getMinutes())}.png`;
+    const file = new File([blob], name, { type: 'image/png' });
+    if (matchMedia('(pointer: coarse)').matches && navigator.canShare?.({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: 'CycMap 路線' }); return; } catch (e) { if (e.name === 'AbortError') return; }
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  } catch {
+    alert('匯出失敗，請稍後再試');
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 // ---------- settings ----------
 const dlg = $('#settings');
