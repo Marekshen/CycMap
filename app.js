@@ -81,6 +81,7 @@ function renderMarkers() {
 
 map.on('click', e => {
   closeResults();
+  if (Date.now() < ignoreClickUntil) return;
   points.push(e.latlng);
   renderMarkers();
   updateRoute();
@@ -91,6 +92,95 @@ $('#btnClear').addEventListener('click', () => {
   renderMarkers();
   updateRoute();
 });
+
+$('#btnReverse').addEventListener('click', () => {
+  if (points.length < 2) return;
+  points.reverse();
+  renderMarkers();
+  updateRoute();
+});
+
+// ---------- drag route to insert waypoint ----------
+let ignoreClickUntil = 0;
+const ghostLine = L.polyline([], { color: '#2563eb', weight: 3, dashArray: '6 6', interactive: false });
+const ghostPin = L.marker([0, 0], { icon: L.divIcon({ className: '', html: '<div class="pin ghost"></div>', iconSize: [22, 22], iconAnchor: [11, 11] }), interactive: false });
+
+function distToSeg(p, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+
+function nearestRouteIndex(cp) {
+  let best = Infinity, idx = -1;
+  let prev = map.latLngToContainerPoint(routeCoords[0]);
+  for (let i = 1; i < routeCoords.length; i++) {
+    const cur = map.latLngToContainerPoint(routeCoords[i]);
+    const d = distToSeg(cp, prev, cur);
+    if (d < best) { best = d; idx = i; }
+    prev = cur;
+  }
+  return { idx, dist: best };
+}
+
+function insertIndexFor(routeIdx) {
+  let from = 0, pos = 1;
+  for (let w = 1; w < points.length - 1; w++) {
+    let best = Infinity, bi = from;
+    const wp = [points[w].lat, points[w].lng];
+    for (let i = from; i < routeCoords.length; i++) {
+      const d = haversine(wp, routeCoords[i]);
+      if (d < best) { best = d; bi = i; }
+    }
+    from = bi;
+    if (bi < routeIdx) pos = w + 1;
+  }
+  return pos;
+}
+
+const mapEl = map.getContainer();
+mapEl.addEventListener('pointerdown', e => {
+  if (e.button > 0 || routeCoords.length < 2 || points.length < 2) return;
+  if (e.target.closest('.leaflet-marker-icon, .leaflet-control')) return;
+  const rect = mapEl.getBoundingClientRect();
+  const cp = L.point(e.clientX - rect.left, e.clientY - rect.top);
+  const hit = nearestRouteIndex(cp);
+  if (hit.dist > (e.pointerType === 'mouse' ? 10 : 20)) return;
+
+  e.stopPropagation();
+  e.preventDefault();
+  map.dragging.disable();
+  const insertAt = insertIndexFor(hit.idx);
+  const sx = e.clientX, sy = e.clientY;
+  let moved = false;
+
+  const move = ev => {
+    if (!moved && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 6) return;
+    moved = true;
+    const ll = map.containerPointToLatLng(L.point(ev.clientX - rect.left, ev.clientY - rect.top));
+    ghostLine.setLatLngs([points[insertAt - 1], ll, points[insertAt]]).addTo(map);
+    ghostPin.setLatLng(ll).addTo(map);
+  };
+  const up = ev => {
+    document.removeEventListener('pointermove', move);
+    document.removeEventListener('pointerup', up);
+    document.removeEventListener('pointercancel', up);
+    map.dragging.enable();
+    map.removeLayer(ghostLine);
+    map.removeLayer(ghostPin);
+    if (!moved || ev.type === 'pointercancel') return;
+    ignoreClickUntil = Date.now() + 400;
+    const ll = map.containerPointToLatLng(L.point(ev.clientX - rect.left, ev.clientY - rect.top));
+    points.splice(insertAt, 0, ll);
+    renderMarkers();
+    updateRoute();
+  };
+  document.addEventListener('pointermove', move);
+  document.addEventListener('pointerup', up);
+  document.addEventListener('pointercancel', up);
+}, true);
 
 // ---------- geo helpers ----------
 function haversine(a, b) {

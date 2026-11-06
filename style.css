@@ -81,6 +81,7 @@ button { font: inherit; cursor: pointer; }
 }
 .pin.start { background: #16a34a; }
 .pin.end { background: #dc2626; }
+.pin.ghost { width: 22px; height: 22px; background: rgba(37, 99, 235, 0.6); }
 
 dialog {
   border: 0; border-radius: 16px; padding: 18px 20px; width: min(340px, calc(100vw - 32px));
