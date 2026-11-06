@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#16a34a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>CycMap</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="map"></div>
+
+<form id="search" class="glass" autocomplete="off">
+  <input id="q" type="search" placeholder="搜尋景點、地址…" enterkeyhint="search">
+  <button type="submit">搜尋</button>
+  <ul id="results" hidden></ul>
+</form>
+
+<div id="layers" class="glass">
+  <button data-layer="map" class="active">地圖</button>
+  <button data-layer="sat">衛星</button>
+  <button data-layer="cycle">單車</button>
+</div>
+
+<div id="tools">
+  <button id="btnClear" class="glass">清除</button>
+  <button id="btnSettings" class="glass">設定</button>
+</div>
+
+<div id="card" class="glass hidden">
+  <canvas id="mini" width="120" height="120"></canvas>
+  <div class="stats">
+    <div class="row"><span class="label">距離</span><span id="dist" class="val">--</span></div>
+    <div class="row"><span class="label">預估時間</span><span id="time" class="val">--</span></div>
+    <div class="row sub"><span class="label">爬升</span><span id="climb">--</span></div>
+    <div class="row sub"><span class="label">均速</span><span id="avg">--</span></div>
+    <div id="status"></div>
+  </div>
+</div>
+
+<dialog id="settings">
+  <form method="dialog">
+    <h3>設定</h3>
+    <label>平地均速 (0%)<span><input id="sFlat" type="number" min="1" max="80" step="0.5"> km/h</span></label>
+    <label>陡坡速度 (10% 以上)<span><input id="sSteep" type="number" min="1" max="80" step="0.5"> km/h</span></label>
+    <p class="hint">0% 到 10% 之間以等差計算，下坡以平地速度計。</p>
+    <div class="actions">
+      <button value="cancel">取消</button>
+      <button id="sSave" value="save" class="primary">儲存</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
