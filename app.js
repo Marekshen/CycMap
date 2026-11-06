@@ -447,7 +447,9 @@ function resample(coords, step) {
     let pos = step - carry;
     while (pos <= d) {
       const t = pos / d;
-      out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+      out.push(a.length > 2
+        ? [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
+        : [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
       pos += step;
     }
     carry = d - (pos - step);
@@ -473,7 +475,7 @@ async function fetchBRouter(pts) {
   if (!r.ok) throw new Error(await r.text());
   const f = (await r.json()).features[0];
   return {
-    coords: f.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
+    coords: f.geometry.coordinates.map(([lng, lat, ele]) => ele == null ? [lat, lng] : [lat, lng, ele]),
     distance: +f.properties['track-length']
   };
 }
@@ -551,7 +553,7 @@ async function updateRoute() {
   setStatus('取得高度資料中…');
 
   try {
-    const raw = await fetchElevations(samples);
+    const raw = samples.every(s => s.length > 2) ? samples.map(s => s[2]) : await fetchElevations(samples);
     if (id !== reqId) return;
     const ele = raw.map((_, i) => {
       const a = raw[Math.max(0, i - 1)], b = raw[i], c = raw[Math.min(raw.length - 1, i + 1)];
