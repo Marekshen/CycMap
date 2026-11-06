@@ -76,6 +76,8 @@ button.icon svg { width: 20px; height: 20px; }
 #favList li.empty { padding: 10px; font-size: 14px; }
 #favList .name { flex: 1; min-width: 0; padding: 8px 0; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #favList .name::before { content: "★ "; color: #facc15; }
+#favList .name.route::before { content: "⤳ "; color: #60a5fa; font-weight: 700; }
+#card { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 #favList li:hover { background: rgba(255, 255, 255, 0.06); }
 #favList button.icon { width: 34px; height: 34px; }
 .leaflet-tooltip.fav-label {

@@ -264,6 +264,7 @@ function saveFavs() { save('cycmap.favs', favs); }
 function renderFavs() {
   favLayer.clearLayers();
   favs.forEach(f => {
+    if (f.type === 'route') return;
     L.marker([f.lat, f.lng], { icon: favIcon, bubblingMouseEvents: false })
       .bindTooltip(f.name, { direction: 'right', offset: [10, 0], className: 'fav-label', permanent: true })
       .on('click', e => {
@@ -298,17 +299,22 @@ function renderFavList() {
   favs.forEach((f, i) => {
     const li = document.createElement('li');
     const name = document.createElement('span');
-    name.className = 'name';
     name.textContent = f.name;
-    name.addEventListener('click', () => { closePops(); map.setView([f.lat, f.lng], Math.max(map.getZoom(), 15)); });
-    li.append(
-      name,
-      iconBtn('i-plus', '加入路線', () => {
+    const isRoute = f.type === 'route';
+    name.className = isRoute ? 'name route' : 'name';
+    li.append(name);
+    if (isRoute) {
+      name.addEventListener('click', () => loadSavedRoute(f));
+    } else {
+      name.addEventListener('click', () => { closePops(); map.setView([f.lat, f.lng], Math.max(map.getZoom(), 15)); });
+      li.append(iconBtn('i-plus', '加入路線', () => {
         closePops();
         points.push(L.latLng(f.lat, f.lng));
         renderMarkers();
         updateRoute();
-      }),
+      }));
+    }
+    li.append(
       iconBtn('i-pencil', '重新命名', () => openFavDialog({ index: i })),
       iconBtn('i-trash', '刪除', () => {
         if (!confirm(`刪除「${f.name}」？`)) return;
@@ -326,7 +332,7 @@ const favDlg = $('#favDialog');
 function openFavDialog(opts) {
   favEdit = opts;
   const f = opts.index != null ? favs[opts.index] : null;
-  $('#favTitle').textContent = f ? '重新命名' : '新增喜愛點';
+  $('#favTitle').textContent = f ? '重新命名' : opts.route ? '儲存路線' : '新增喜愛點';
   $('#favName').value = f ? f.name : '';
   favDlg.showModal();
   setTimeout(() => $('#favName').focus(), 50);
@@ -335,6 +341,7 @@ favDlg.addEventListener('close', () => {
   const name = $('#favName').value.trim();
   if (favDlg.returnValue !== 'save' || !name || !favEdit) return;
   if (favEdit.index != null) favs[favEdit.index].name = name;
+  else if (favEdit.route) favs.push({ type: 'route', name, pts: favEdit.route });
   else favs.push({ name, lat: favEdit.latlng.lat, lng: favEdit.latlng.lng });
   favEdit = null;
   saveFavs();
@@ -342,6 +349,41 @@ favDlg.addEventListener('close', () => {
 });
 $('#favName').addEventListener('keydown', e => {
   if (e.key === 'Enter') { e.preventDefault(); favDlg.close('save'); }
+});
+
+function loadSavedRoute(f) {
+  closePops();
+  points.length = 0;
+  f.pts.forEach(([lat, lng]) => points.push(L.latLng(lat, lng)));
+  renderMarkers();
+  map.fitBounds(L.latLngBounds(points), { padding: [70, 70] });
+  updateRoute().then(() => {
+    if (routeCoords.length >= 2) map.fitBounds(routeLine.getBounds(), { padding: [70, 70] });
+  });
+}
+
+function saveCurrentRoute() {
+  if (points.length < 2) return;
+  navigator.vibrate?.(15);
+  openFavDialog({ route: points.map(p => [p.lat, p.lng]) });
+}
+
+const cardEl = $('#card');
+let cardTimer = null, cardStart = null, cardPointer = 'mouse';
+cardEl.addEventListener('pointerdown', e => {
+  cardPointer = e.pointerType;
+  if (e.pointerType === 'mouse') return;
+  cardStart = [e.clientX, e.clientY];
+  clearTimeout(cardTimer);
+  cardTimer = setTimeout(saveCurrentRoute, 500);
+});
+cardEl.addEventListener('pointermove', e => {
+  if (cardStart && Math.hypot(e.clientX - cardStart[0], e.clientY - cardStart[1]) > 8) clearTimeout(cardTimer);
+});
+['pointerup', 'pointercancel', 'pointerleave'].forEach(t => cardEl.addEventListener(t, () => clearTimeout(cardTimer)));
+cardEl.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  if (cardPointer === 'mouse') saveCurrentRoute();
 });
 
 // ---------- toolbar & popovers ----------
